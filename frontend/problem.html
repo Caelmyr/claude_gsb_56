@@ -10,14 +10,61 @@
   <div id="nav"></div>
 
   <div class="container" style="max-width:960px">
+    <div id="listBar"></div>
     <div id="problemBody"></div>
   </div>
 
   <script src="/assets/app.js"></script>
   <script>
     OJ.boot("index");
-    const pid = new URLSearchParams(location.search).get("id");
+    const params = new URLSearchParams(location.search);
+    const pid = params.get("id");
+    const listId = params.get("list");
 
+    // 刷题清单进度横幅（仅在带 list 参数且已登录时显示）
+    async function loadListBar() {
+      const box = OJ.el("listBar");
+      if (!listId || !OJ.currentUser()) return;
+      try {
+        const l = await OJ.api("/lists/" + encodeURIComponent(listId));
+        const idx = l.items.findIndex(it => it.problem_id === pid);
+        if (idx < 0) return;
+        const cur = l.items[idx];
+        const prev = l.items[idx - 1];
+        const next = l.items[idx + 1];
+        const pctv = l.item_count ? Math.round(l.done_count / l.item_count * 100) : 0;
+        const navBtn = (it, label) => it ? `
+          <a class="btn btn-outline btn-sm" href="/problem.html?id=${OJ.esc(it.problem_id)}&list=${OJ.esc(l.id)}">${label}</a>` : "";
+        box.innerHTML = `
+          <div class="listbar">
+            <div class="lb-info">
+              <div class="lb-title"><a href="/lists.html?list=${OJ.esc(l.id)}">📋 ${OJ.esc(l.title)}</a></div>
+              <div class="lb-sub">第 ${idx + 1} / ${l.item_count} 题 · 已完成 ${l.done_count} 题</div>
+            </div>
+            <div class="progress"><div class="progress-bar" style="width:${pctv}%"></div></div>
+            <div class="lb-pct">${pctv}%</div>
+            <div class="flex gap-8">
+              ${navBtn(prev, "← 上一题")}
+              <button class="btn ${cur.done ? "btn-outline" : "btn-primary"} btn-sm" id="lbDoneBtn"
+                      onclick="toggleListDone('${OJ.esc(l.id)}','${OJ.esc(pid)}',${!cur.done})">
+                ${cur.done ? "✓ 已完成（取消）" : "标记完成"}
+              </button>
+              ${navBtn(next, "下一题 →")}
+            </div>
+          </div>`;
+      } catch (e) { /* 题单不可见或未登录：静默不显示横幅 */ }
+    }
+
+    async function toggleListDone(lid, problemId, done) {
+      try {
+        await OJ.api(`/lists/${encodeURIComponent(lid)}/items/${encodeURIComponent(problemId)}`,
+          { method: "PUT", body: { done } });
+        OJ.toast(done ? "已标记完成 🎉" : "已取消完成标记", "success");
+        loadListBar();
+      } catch (e) { OJ.toast(e.message, "error"); }
+    }
+
+    const listSuffix = listId ? "&list=" + encodeURIComponent(listId) : "";
     function renderMarkdownish(text) {
       // 简单段落化：空行分段，保留行内 code
       if (!text) return '<span class="muted">（无）</span>';
@@ -48,7 +95,7 @@
                 时间限制 <b>${p.time_limit_ms} ms</b> · 内存限制 <b>${Math.round(p.memory_limit_kb / 1024)} MB</b> · 分值 <b>${p.points}</b>
               </div>
             </div>
-            <button class="btn btn-primary btn-lg" onclick="location.href='/editor.html?id=${OJ.esc(p.id)}'">✏️ 提交代码</button>
+            <button class="btn btn-primary btn-lg" onclick="location.href='/editor.html?id=${OJ.esc(p.id)}${listSuffix}'">✏️ 提交代码</button>
           </div>
 
           <div class="card">
@@ -79,14 +126,24 @@
           </div>
 
           <div class="flex gap-8 wrap">
-            <button class="btn btn-outline" onclick="history.back()">← 返回列表</button>
+            <button class="btn btn-outline" onclick="goBack()">← 返回</button>
             <a class="btn btn-outline" href="/forum.html?problem_id=${OJ.esc(p.id)}">💬 讨论该题</a>
+            ${listId ? `<a class="btn btn-outline" href="/lists.html?list=${OJ.esc(listId)}">📋 回到题单</a>` : ""}
           </div>`;
       } catch (e) {
         box.innerHTML = `<div class="empty">${OJ.esc(e.message)}</div>`;
       }
     }
+
+    function goBack() {
+      // 从题单进来：优先回清单页；上一页仍在本站则后退；否则回题库
+      if (listId) { location.href = "/lists.html?list=" + encodeURIComponent(listId); return; }
+      if (document.referrer && document.referrer.startsWith(location.origin)) history.back();
+      else location.href = "/index.html";
+    }
+
     load();
+    loadListBar();
   </script>
 </body>
 </html>

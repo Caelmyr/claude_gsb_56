@@ -157,7 +157,9 @@
         document.getElementById("problemTitle").textContent = p.title;
         document.getElementById("problemHint").textContent =
           `时限 ${p.time_limit_ms}ms · 内存 ${Math.round(p.memory_limit_kb / 1024)}MB · ${p.points} 分`;
-        document.getElementById("backLink").href = "/problem.html?id=" + pid;
+        const listId = new URLSearchParams(location.search).get("list");
+        document.getElementById("backLink").href =
+          "/problem.html?id=" + pid + (listId ? "&list=" + encodeURIComponent(listId) : "");
       } catch (e) {}
     }
 

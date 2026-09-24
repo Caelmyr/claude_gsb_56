@@ -26,6 +26,7 @@ PAGES = [
     ("submissions.html", "提交记录与评测结果"),
     ("leaderboard.html", "实时排行榜"),
     ("contest.html", "竞赛管理"),
+    ("lists.html", "我的题单"),
     ("users.html", "用户管理"),
     ("forum.html", "讨论区"),
     ("stats.html", "统计报表"),

@@ -67,6 +67,7 @@
     ["/submissions.html", "提交记录", "submissions"],
     ["/leaderboard.html", "排行榜", "leaderboard"],
     ["/contest.html", "竞赛", "contest"],
+    ["/lists.html", "我的题单", "lists"],
     ["/forum.html", "讨论区", "forum"],
     ["/stats.html", "统计报表", "stats"],
     ["/users.html", "用户管理", "users", true],
