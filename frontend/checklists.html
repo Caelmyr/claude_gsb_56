@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的题单 - 在线代码评测与竞赛系统</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <div id="nav"></div>
+
+  <div class="container">
+    <div class="page-head">
+      <div>
+        <h1>🗂️ 我的刷题清单</h1>
+        <div class="sub">自建题单、按固定顺序刷题，随时标记完成进度（仅自己可见）</div>
+      </div>
+      <div class="flex gap-8">
+        <button class="btn btn-outline hidden" id="backBtn" onclick="goList()">← 返回题单</button>
+        <button class="btn btn-outline" onclick="loadCurrent()">🔄 刷新</button>
+        <button class="btn btn-primary" id="newListBtn" onclick="openListForm()">＋ 新建题单</button>
+      </div>
+    </div>
+
+    <!-- 题单列表视图 -->
+    <div id="listView">
+      <div id="cards" class="checklist-grid">
+        <div class="empty"><span class="spinner"></span> 加载中…</div>
+      </div>
+    </div>
+
+    <!-- 题单详情视图 -->
+    <div id="detailView" class="hidden">
+      <div class="card" id="detailHead"></div>
+      <div class="card">
+        <div class="card-title">
+          题目顺序
+          <span class="hint">勾选复选框标记完成；上下箭头调整刷题顺序</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:56px" class="text-center">完成</th>
+                <th style="width:60px">顺序</th>
+                <th>题目</th>
+                <th style="width:110px" class="text-center">难度</th>
+                <th style="width:140px">完成时间</th>
+                <th style="width:230px" class="text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="itemList"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/app.js"></script>
+  <script>
+    OJ.boot("checklists");
+
+    let current = null;       // 当前打开的题单
+    let allProblems = null;   // 添加题目用的题库缓存
+
+    // ---------- 视图切换（hash 支持直接进入某个题单） ----------
+    function viewMode() { return location.hash.replace("#", "").split("/")[0]; }
+    function detailIdFromHash() {
+      const parts = location.hash.replace("#", "").split("/");
+      return parts[0] === "l" && parts[1] ? parts[1] : null;
+    }
+    window.addEventListener("hashchange", loadCurrent);
+
+    async function loadCurrent() {
+      const id = detailIdFromHash();
+      OJ.el("backBtn").classList.toggle("hidden", !id);
+      OJ.el("newListBtn").classList.toggle("hidden", !!id);
+      if (id) {
+        await openDetail(id, true);
+      } else {
+        OJ.el("detailView").classList.add("hidden");
+        OJ.el("listView").classList.remove("hidden");
+        await loadLists();
+      }
+    }
+
+    function goList() { location.hash = ""; }
+
+    // ---------- 题单列表 ----------
+    async function loadLists() {
+      const box = OJ.el("cards");
+      try {
+        const data = await OJ.api("/checklists");
+        if (!data.items.length) {
+          box.innerHTML = `<div class="card empty" style="grid-column:1/-1">
+            还没有题单，点击右上角「＋ 新建题单」开始组织你的刷题计划吧。</div>`;
+          return;
+        }
+        box.innerHTML = data.items.map(c => {
+          const pct = c.total_count ? Math.round(c.done_count / c.total_count * 100) : 0;
+          return `
+          <div class="cl-card" onclick="location.hash='#l/${OJ.esc(c.id)}'">
+            <div class="cl-card-name">${OJ.esc(c.name)}</div>
+            <div class="cl-card-desc">${OJ.esc(c.description) || '<span class="muted">暂无描述</span>'}</div>
+            <div class="cl-progress" title="${c.done_count}/${c.total_count} 已完成">
+              <div class="cl-progress-bar" style="width:${pct}%"></div>
+            </div>
+            <div class="cl-card-foot">
+              <span class="muted">${c.done_count}/${c.total_count} 已完成 · ${pct}%</span>
+              <span class="muted">${OJ.fmtTime(c.created_at)}</span>
+            </div>
+          </div>`;
+        }).join("");
+      } catch (e) {
+        if (/登录/.test(e.message)) {
+          box.innerHTML = `<div class="card empty" style="grid-column:1/-1">
+            请先 <a href="/index.html?login=1">登录</a> 后管理自己的题单。</div>`;
+        } else {
+          box.innerHTML = `<div class="card empty" style="grid-column:1/-1">${OJ.esc(e.message)}</div>`;
+        }
+      }
+    }
+
+    // ---------- 新建 / 重命名题单 ----------
+    function openListForm(id) {
+      const editing = !!id;
+      const body = `
+        <div class="form-group"><label>题单名称</label>
+          <input id="f_name" maxlength="80" placeholder="例如：动态规划入门 30 题"
+                 value="${editing ? OJ.esc(current.name) : ""}"></div>
+        <div class="form-group"><label>描述（可选）</label>
+          <textarea id="f_desc" rows="3" maxlength="500" placeholder="这个题单的用途、刷题计划…">${editing ? OJ.esc(current.description || "") : ""}</textarea></div>`;
+      const mask = OJ.openModal(editing ? "编辑题单" : "新建题单", body);
+      mask.querySelector(".modal-actions").innerHTML = `
+        <button class="btn btn-outline" onclick="this.closest('.modal-mask').remove()">取消</button>
+        <button class="btn btn-primary" onclick="saveList('${id || ""}')">保存</button>`;
+      setTimeout(() => OJ.el("f_name").focus(), 0);
+    }
+
+    async function saveList(id) {
+      const payload = {
+        name: OJ.el("f_name").value.trim(),
+        description: OJ.el("f_desc").value.trim(),
+      };
+      if (!payload.name) { OJ.toast("题单名称不能为空", "error"); return; }
+      try {
+        if (id) {
+          await OJ.api("/checklists/" + id, { method: "PUT", body: payload });
+        } else {
+          const cl = await OJ.api("/checklists", { method: "POST", body: payload });
+          location.hash = "#l/" + cl.id;
+        }
+        OJ.toast("保存成功", "success");
+        document.querySelector(".modal-mask").remove();
+        loadCurrent();
+      } catch (e) { OJ.toast(e.message, "error"); }
+    }
+
+    async function deleteList(id) {
+      if (!await OJ.confirmDialog("确定删除题单「" + current.name + "」？此操作不可恢复。")) return;
+      try {
+        await OJ.api("/checklists/" + id, { method: "DELETE" });
+        OJ.toast("已删除", "success");
+        goList();
+      } catch (e) { OJ.toast(e.message, "error"); }
+    }
+
+    // ---------- 题单详情 ----------
+    async function openDetail(id, keepHash) {
+      OJ.el("listView").classList.add("hidden");
+      OJ.el("detailView").classList.remove("hidden");
+      try {
+        current = await OJ.api("/checklists/" + id);
+        renderDetail();
+      } catch (e) {
+        OJ.toast(e.message, "error");
+        goList();
+      }
+    }
+
+    function renderDetail() {
+      const c = current;
+      const pct = c.total_count ? Math.round(c.done_count / c.total_count * 100) : 0;
+      OJ.el("detailHead").innerHTML = `
+        <div class="flex-between wrap gap-12">
+          <div style="min-width:260px">
+            <h2 style="font-size:18px">${OJ.esc(c.name)}</h2>
+            <div class="muted mt-8">${OJ.esc(c.description || "暂无描述")}</div>
+            <div class="muted mt-8">创建于 ${OJ.fmtTime(c.created_at)} · 最近更新 ${OJ.fmtTime(c.updated_at)}</div>
+          </div>
+          <div class="flex gap-8 wrap">
+            <button class="btn btn-primary btn-sm" onclick="openAddDialog()">＋ 添加题目</button>
+            <button class="btn btn-outline btn-sm" onclick="openListForm('${OJ.esc(c.id)}')">编辑信息</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteList('${OJ.esc(c.id)}')">删除题单</button>
+          </div>
+        </div>
+        <div class="cl-detail-progress mt-16">
+          <div class="flex-between"><span class="muted">完成进度</span>
+            <span class="muted">${c.done_count} / ${c.total_count}（${pct}%）</span></div>
+          <div class="cl-progress"><div class="cl-progress-bar" style="width:${pct}%"></div></div>
+        </div>`;
+
+      const tbody = OJ.el("itemList");
+      if (!c.items.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty">题单还是空的，点击「＋ 添加题目」开始吧</td></tr>`;
+        return;
+      }
+      const diffNames = ["", "入门", "简单", "中等", "较难", "困难"];
+      tbody.innerHTML = c.items.map((it, i) => `
+        <tr class="${it.done ? "cl-item-done" : ""}">
+          <td class="text-center">
+            <input type="checkbox" class="cl-check" ${it.done ? "checked" : ""}
+                   onchange="toggleDone('${OJ.esc(it.problem_id)}', this.checked)"
+                   title="标记完成情况" style="width:18px;height:18px">
+          </td>
+          <td class="mono muted text-center">${i + 1}</td>
+          <td>
+            ${it.missing
+              ? `<span class="muted">题目 ${OJ.esc(it.problem_id)} 已从题库删除</span>`
+              : `<a href="/problem.html?id=${OJ.esc(it.problem_id)}">${OJ.esc(it.title)}</a>
+                 <span class="mono muted">(${OJ.esc(it.problem_id)})</span>`}
+            ${it.done ? `<span class="badge AC" style="margin-left:6px">已完成</span>` : ""}
+          </td>
+          <td class="text-center">${it.missing ? "-" : OJ.difficultyLabel(it.difficulty)}</td>
+          <td class="muted mono">${it.done ? OJ.fmtTime(it.done_at) : "-"}</td>
+          <td class="text-right">
+            <div class="cl-row-actions">
+              <button class="btn btn-outline btn-sm" ${i === 0 ? "disabled" : ""}
+                      onclick="moveItem(${i}, ${i - 1})" title="上移">↑</button>
+              <button class="btn btn-outline btn-sm" ${i === c.items.length - 1 ? "disabled" : ""}
+                      onclick="moveItem(${i}, ${i + 1})" title="下移">↓</button>
+              <button class="btn btn-outline btn-sm"
+                      onclick="openProblem('${OJ.esc(it.problem_id)}')" ${it.missing ? "disabled" : ""}>去做题</button>
+              <button class="btn btn-danger btn-sm"
+                      onclick="removeItem('${OJ.esc(it.problem_id)}')">移除</button>
+            </div>
+          </td>
+        </tr>`).join("");
+    }
+
+    async function toggleDone(problemId, done) {
+      try {
+        current = await OJ.api(`/checklists/${current.id}/items/${problemId}/done`,
+                               { method: "PUT", body: { done } });
+        renderDetail();
+        OJ.toast(done ? "已标记为完成 🎉" : "已取消完成标记", "success");
+      } catch (e) { OJ.toast(e.message, "error"); loadCurrent(); }
+    }
+
+    async function moveItem(from, to) {
+      const order = current.items.map(it => it.problem_id);
+      const [pid] = order.splice(from, 1);
+      order.splice(to, 0, pid);
+      try {
+        current = await OJ.api("/checklists/" + current.id + "/reorder",
+                               { method: "PUT", body: { order } });
+        renderDetail();
+      } catch (e) { OJ.toast(e.message, "error"); }
+    }
+
+    async function removeItem(problemId) {
+      if (!await OJ.confirmDialog("确定从题单中移除这道题？完成标记也会一并清除。")) return;
+      try {
+        current = await OJ.api(`/checklists/${current.id}/items/${problemId}`,
+                               { method: "DELETE" });
+        OJ.toast("已移除", "success");
+        renderDetail();
+      } catch (e) { OJ.toast(e.message, "error"); }
+    }
+
+    function openProblem(problemId) {
+      location.href = "/problem.html?id=" + encodeURIComponent(problemId);
+    }
+
+    // ---------- 添加题目 ----------
+    async function loadAllProblems(force) {
+      if (!allProblems || force) {
+        const data = await OJ.api("/problems?limit=10000");
+        allProblems = data.items || [];
+      }
+      return allProblems;
+    }
+
+    async function openAddDialog() {
+      const mask = OJ.openModal("添加题目到「" + current.name + "」",
+        `<div class="toolbar">
+           <input type="text" id="addQ" placeholder="搜索编号 / 标题 / 标签…"
+                  oninput="renderPicker()" style="max-width:300px">
+           <select id="addDiff" style="width:auto" onchange="renderPicker()">
+             <option value="">全部难度</option>
+             <option value="1">入门</option><option value="2">简单</option>
+             <option value="3">中等</option><option value="4">较难</option>
+             <option value="5">困难</option>
+           </select>
+           <span class="hint" id="pickerHint"></span>
+         </div>
+         <div class="table-wrap" style="max-height:46vh;overflow-y:auto">
+           <table>
+             <thead><tr><th style="width:48px"></th><th>编号</th><th>标题</th>
+               <th style="width:90px" class="text-center">难度</th></tr></thead>
+             <tbody id="pickerList"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+           </table>
+         </div>`);
+      mask.querySelector(".modal").style.maxWidth = "760px";
+      mask.querySelector(".modal-actions").innerHTML = `
+        <span class="hint mr-auto" id="pickerCount"></span>
+        <button class="btn btn-outline" onclick="this.closest('.modal-mask').remove()">关闭</button>
+        <button class="btn btn-primary" onclick="addSelected()">添加选中题目</button>`;
+      try {
+        await loadAllProblems();
+        renderPicker();
+      } catch (e) {
+        OJ.el("pickerList").innerHTML =
+          `<tr><td colspan="4" class="empty">${OJ.esc(e.message)}</td></tr>`;
+      }
+    }
+
+    function renderPicker() {
+      const q = OJ.el("addQ").value.trim().toLowerCase();
+      const diff = OJ.el("addDiff").value;
+      const inList = new Set(current.items.map(it => it.problem_id));
+      const rows = allProblems.filter(p => {
+        if (diff && String(p.difficulty) !== diff) return false;
+        if (!q) return true;
+        return (p.id + " " + p.title + " " + (p.tags || []).join(" ")).toLowerCase().includes(q);
+      });
+      OJ.el("pickerCount").textContent =
+        `题库共 ${allProblems.length} 题，当前筛选 ${rows.length} 题（已在题单中的不可重复勾选）`;
+      const tbody = OJ.el("pickerList");
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty">没有匹配的题目</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.slice(0, 300).map(p => {
+        const used = inList.has(p.id);
+        return `<tr${used ? ' class="cl-item-done"' : ""}>
+          <td><input type="checkbox" class="pick" value="${OJ.esc(p.id)}"
+                     style="width:16px;height:16px" ${used ? "disabled" : ""}></td>
+          <td class="mono muted">${OJ.esc(p.id)}</td>
+          <td>${OJ.esc(p.title)} ${used ? '<span class="tag">已在题单</span>' : ""}</td>
+          <td class="text-center">${OJ.difficultyLabel(p.difficulty)}</td>
+        </tr>`;
+      }).join("") + (rows.length > 300
+        ? `<tr><td colspan="4" class="empty">仅显示前 300 条，请输入关键词缩小范围</td></tr>` : "");
+    }
+
+    async function addSelected() {
+      const ids = [...document.querySelectorAll("#pickerList .pick:checked")].map(x => x.value);
+      if (!ids.length) { OJ.toast("请先勾选要添加的题目", "error"); return; }
+      const btn = document.querySelector(".modal-actions .btn-primary");
+      btn.disabled = true;
+      let okCount = 0;
+      for (const pid of ids) {
+        try {
+          current = await OJ.api(`/checklists/${current.id}/items`,
+                                 { method: "POST", body: { problem_id: pid } });
+          okCount++;
+        } catch (e) { /* 重复或已删除：跳过 */ }
+      }
+      document.querySelector(".modal-mask").remove();
+      renderDetail();
+      OJ.toast(`已添加 ${okCount} 道题`, "success");
+    }
+
+    // ---------- 初始化：未登录先要求登录 ----------
+    (async function init() {
+      try {
+        await OJ.requireAuth();
+      } catch (e) {
+        OJ.el("cards").innerHTML = `<div class="card empty" style="grid-column:1/-1">
+          ${OJ.esc(e.message)}，<a href="/index.html?login=1">去登录</a></div>`;
+        return;
+      }
+      loadCurrent();
+    })();
+  </script>
+</body>
+</html>

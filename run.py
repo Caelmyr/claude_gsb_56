@@ -30,6 +30,7 @@ PAGES = [
     ("forum.html", "讨论区"),
     ("stats.html", "统计报表"),
     ("settings.html", "系统设置"),
+    ("checklists.html", "我的题单"),
 ]
 
 
